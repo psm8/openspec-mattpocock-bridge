@@ -1,0 +1,10 @@
+# Include from .gitlab-ci.yml:  include: { local: .gitlab/openspec-matt.yml }
+openspec-matt:lint:
+  image: node:22-alpine
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    # Fails on spec format, duplicate ADR numbers and duplicate story names; warns on size.
+    - npx -y openspec-matt@0 lint
