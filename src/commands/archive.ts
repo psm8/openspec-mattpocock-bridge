@@ -1,0 +1,161 @@
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import {
+  ChangeMeta,
+  SPECS_DIR,
+  UsageError,
+  livingSpecPath,
+  openChange,
+  readDeltas,
+  readLivingSpec,
+  type Change,
+} from "../change.js";
+import { git, stagedFiles } from "../git.js";
+import { MergeConflict, mergeDelta } from "../merge/merge.js";
+import { lintLivingSpec } from "../spec/lint.js";
+
+export interface MergeOutcome {
+  /** Capability -> applied operations. */
+  applied: Record<string, string[]>;
+  created: string[];
+  conflicts: MergeConflict[];
+}
+
+/**
+ * Step 1 of archive: merge every delta into docs/specs. All-or-nothing: if any capability
+ * conflicts, or a spec fails lint before or after the merge, no file is written.
+ */
+export function mergeChange(root: string, name: string): MergeOutcome {
+  const change = openChange(root, name);
+  const meta = new ChangeMeta(change);
+  if (meta.merged) throw new UsageError(`'${name}' is already merged into ${SPECS_DIR}; run 'openspec-matt archive ${name} --commit'`);
+
+  const outcome: MergeOutcome = { applied: {}, created: [], conflicts: [] };
+  const writes: { path: string; text: string }[] = [];
+
+  for (const { capability, delta } of readDeltas(change)) {
+    const file = `${SPECS_DIR}/${capability}.md`;
+    try {
+      const current = readLivingSpec(root, capability);
+      // A malformed spec (duplicate story names, a stray '### Notes' inside User Stories) would be
+      // merged wrongly, so it must be fixed first.
+      if (current !== undefined) assertLintClean(capability, current, file, "fix the living spec first (do not re-run base for this; it would accept hand edits made since propose)");
+      const result = mergeDelta(current, capability, delta, meta.base(capability));
+      assertLintClean(capability, result.text, file, "the delta would produce an invalid spec; fix the delta");
+      outcome.applied[capability] = result.applied;
+      if (result.created) outcome.created.push(capability);
+      writes.push({ path: livingSpecPath(root, capability), text: result.text });
+    } catch (error) {
+      if (!(error instanceof MergeConflict)) throw error;
+      outcome.conflicts.push(error);
+    }
+  }
+
+  if (outcome.conflicts.length > 0) return outcome;
+
+  for (const { path, text } of writes) {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, text);
+  }
+  meta.merged = true;
+  meta.save();
+  return outcome;
+}
+
+function assertLintClean(capability: string, text: string, file: string, hint: string): void {
+  const errors = lintLivingSpec(text, file).filter((f) => f.severity === "error");
+  if (errors.length === 0) return;
+  throw new MergeConflict(
+    capability,
+    errors.map((f) => ({ code: "invalid-spec", story: "", message: `${hint}: ${f.file}:${f.line} [${f.code}] ${f.message}` })),
+  );
+}
+
+export interface CommitOutcome {
+  /** Undefined when there was nothing new to record (the change was already committed as is). */
+  snapshot?: string;
+  removal: string;
+  noGrill?: string;
+  openTasks: number;
+}
+
+const GOLDEN_PATHS = [SPECS_DIR, "docs/adr", "GLOSSARY.md", "GLOSSARY-MAP.md"];
+
+/**
+ * Step 2 of archive: commit the change folder together with the golden files, then delete the
+ * folder in a second commit. Git history keeps the middle; the tree keeps only golden files.
+ */
+export function commitChange(root: string, name: string): CommitOutcome {
+  const change = openChange(root, name);
+  if (!new ChangeMeta(change).merged) {
+    throw new UsageError(`'${name}' is not merged yet; run 'openspec-matt archive ${name}' and review the diff first`);
+  }
+  // The stock archive skill may have moved the folder already; its old location's removal belongs here too.
+  const activeDir = `openspec/changes/${name}`;
+  const ours = [change.relDir, activeDir, ...GOLDEN_PATHS, "openspec/specs"];
+  const foreign = stagedFiles(root).filter((file) => !ours.some((p) => file === p || file.startsWith(`${p}/`)));
+  if (foreign.length > 0) {
+    throw new UsageError(`unstage these first, archive commits only the change and golden files:\n  ${foreign.join("\n  ")}`);
+  }
+
+  // The folder is deleted after it is committed, so it must be committable: never delete what git won't record.
+  if (isIgnored(root, change.relDir)) {
+    throw new UsageError(`${change.relDir} is gitignored, so it can't be committed; nothing was changed`);
+  }
+
+  const noGrill = noGrillReason(change);
+  const trailer = noGrill ? `\n\nNo-Grill: ${noGrill}` : "";
+  const openTasks = countOpenTasks(change);
+
+  git(root, "reset", "-q", "--", "openspec/specs");
+  stage(root, [change.relDir, activeDir, ...GOLDEN_PATHS]);
+  const snapshot = commitStaged(root, `docs(spec): archive change ${name}${trailer}`);
+
+  rmSync(change.dir, { recursive: true, force: true });
+  // openspec/specs stays empty in this workflow; drop anything a stock "Sync now" wrote there.
+  const stockSpecs = join(root, "openspec/specs");
+  if (existsSync(stockSpecs)) {
+    for (const entry of readdirSync(stockSpecs)) {
+      if (entry !== ".gitkeep") rmSync(join(stockSpecs, entry), { recursive: true, force: true });
+    }
+  }
+  stage(root, [change.relDir, "openspec/specs"]);
+  // The folder was committed above (it is not ignored), so its deletion is always staged.
+  const removal = commitStaged(root, `chore(openspec): remove archived change ${name}`)!;
+
+  return { snapshot, removal, noGrill, openTasks };
+}
+
+function isIgnored(root: string, path: string): boolean {
+  try {
+    git(root, "check-ignore", "-q", "--", path);
+    return true;
+  } catch {
+    return false; // exit status 1: not ignored
+  }
+}
+
+/** Commits what is staged and returns the short sha, or undefined when nothing is staged. */
+function commitStaged(root: string, message: string): string | undefined {
+  if (stagedFiles(root).length === 0) return undefined;
+  git(root, "commit", "-m", message);
+  return git(root, "rev-parse", "--short", "HEAD");
+}
+
+/** `git add --all` for the paths that exist or are tracked (git rejects a pathspec matching neither). */
+function stage(root: string, paths: string[]): void {
+  const present = paths.filter((p) => existsSync(join(root, p)) || git(root, "ls-files", "--", p) !== "");
+  if (present.length > 0) git(root, "add", "--all", "--", ...present);
+}
+
+function noGrillReason(change: Change): string | undefined {
+  const proposal = join(change.dir, "proposal.md");
+  if (!existsSync(proposal)) return undefined;
+  return /^\s*Grilling skipped:\s*(.+)$/im.exec(readFileSync(proposal, "utf8"))?.[1]?.trim();
+}
+
+function countOpenTasks(change: Change): number {
+  const tasks = join(change.dir, "tasks.md");
+  if (!existsSync(tasks)) return 0;
+  return (readFileSync(tasks, "utf8").match(/^\s*[-*+]\s+\[ \]/gm) ?? []).length;
+}

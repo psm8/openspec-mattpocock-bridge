@@ -1,0 +1,71 @@
+name: matt-lite
+version: 1
+description: A small change - grill first, one story delta, exactly one ticket; no design.md
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: Why and what, written only after grilling reaches a shared understanding
+    template: proposal.md
+    instruction: |
+      GRILL FIRST, exactly as for a full change: invoke the `grilling` and
+      `domain-modeling` skills (mattpocock/skills) together, research before
+      asking, and keep going until the user confirms a shared understanding. A
+      small change does not mean fewer questions; it usually just needs fewer.
+      domain-modeling writes GLOSSARY.md and docs/adr/ directly.
+      Only if the user explicitly skips grilling, write
+      `Grilling skipped: <reason>` at the top of proposal.md.
+
+      SUGGEST ESCALATING if grilling produced an ADR, or the work clearly needs
+      more than one ticket: tell the user, and on agreement change `schema:` in
+      this change's `.openspec.yaml` to `matt` and continue with that schema.
+
+      Then write a short proposal.md: **Why** (1-2 sentences; becomes the
+      squash commit message body), **What Changes**, **Capabilities** (living
+      specs in `docs/specs/<capability>.md`; reuse existing names; set
+      `skip_specs: true` in `.openspec.yaml` if no behavior changes),
+      **Impact**.
+    requires: []
+
+  - id: specs
+    generates: "specs/**/*.md"
+    description: Story deltas against the living specs in docs/specs/
+    template: spec.md
+    instruction: |
+      Write `specs/<capability>/spec.md` in OpenSpec delta syntax against the
+      living spec `docs/specs/<capability>.md` (blocks are `### Story: <name>`).
+      Each requirement body is a user story:
+      `As a <actor>, I want <feature>, so that <benefit>.` plus a SHALL/MUST
+      line (under 500 characters), then at least one `#### Scenario:` with
+      WHEN and THEN steps.
+      - MODIFIED: copy the whole `### Story:` block from the living spec, change
+        `Story` to `Requirement`, keep the name exactly, then edit.
+      - REMOVED: `### Requirement: <name>` plus **Reason** and **Migration**.
+      - RENAMED: `- FROM: \`### Requirement: <old>\`` / `- TO: \`### Requirement: <new>\``.
+      - New capability only: start with `## Purpose` (50+ characters).
+      `openspec validate` reports MODIFIED/REMOVED targets as missing from
+      `openspec/specs/`; that is expected (INFO only).
+
+      Then run: npx openspec-matt base <change-name>
+    requires:
+      - proposal
+
+  - id: tasks
+    generates: tasks.md
+    description: The single ticket that implements the change
+    template: tasks.md
+    instruction: |
+      1. Show the user the proposal and the delta and wait for an explicit "go".
+      2. After "go", use exactly ONE ticket in the issue tracker configured in
+         `docs/agents/issue-tracker.md`: reuse the issue the change started
+         from, or create one (What to build + Acceptance criteria checkboxes).
+      3. tasks.md is one line: `- [ ] #<ticket> <ticket title>`
+    requires:
+      - specs
+
+apply:
+  requires: [tasks]
+  tracks: tasks.md
+  instruction: |
+    Implement the ticket test-first (the `tdd` skill), tick its acceptance
+    criteria in the tracker as you go, run the `code-review` skill, then tick
+    the box in tasks.md.

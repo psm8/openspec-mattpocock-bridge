@@ -1,0 +1,129 @@
+name: matt
+version: 1
+description: Grill first with Matt Pocock's skills, plan in OpenSpec, archive into living specs - proposal → specs + design → tasks (tickets)
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: Why and what, written only after grilling reaches a shared understanding
+    template: proposal.md
+    instruction: |
+      GRILL FIRST. Before writing proposal.md, invoke the `grilling` skill and the
+      `domain-modeling` skill (from mattpocock/skills) on the user's idea, together.
+      - Do your own research first (code, GLOSSARY.md, docs/adr/, docs/specs/);
+        only ask the user for decisions.
+      - Keep going until every branch of the design tree is settled and the user
+        confirms you share an understanding. There is no question limit.
+      - domain-modeling writes GLOSSARY.md and docs/adr/NNNN-*.md directly, as
+        terms and decisions settle. Those edits are part of this change's branch.
+        Offer an ADR only when the decision is hard to reverse, surprising
+        without context, and the result of a real trade-off.
+      - Only if the user explicitly skips grilling (for example an unattended CI
+        run), write the line `Grilling skipped: <reason>` at the top of
+        proposal.md and continue.
+
+      Then write proposal.md:
+      - **Why**: 1-2 sentences. This text becomes the squash commit message body,
+        the only place a change's "why" survives after archive.
+      - **What Changes**: bullet list.
+      - **Capabilities**: the living specs this change touches. Living specs live
+        in `docs/specs/<capability>.md` (NOT `openspec/specs/`, which stays empty
+        in this project). List existing ones by their exact file name; name new
+        ones in kebab-case after a durable behavior (`user-auth`), not the work
+        (`add-login-endpoint`). Reuse an existing capability before adding one.
+        If no behavior changes, set `skip_specs: true` in `.openspec.yaml`.
+      - **Impact**: affected code, APIs, systems.
+      Keep it short; the grilling already happened.
+    requires: []
+
+  - id: specs
+    generates: "specs/**/*.md"
+    description: Story deltas against the living specs in docs/specs/
+    template: spec.md
+    instruction: |
+      Write one delta file per capability at `specs/<capability>/spec.md`, in
+      OpenSpec delta syntax. The living spec it targets is
+      `docs/specs/<capability>.md`, where each block is a `### Story: <name>`.
+
+      In the delta, each story is written as a requirement whose body is a user
+      story:
+      ```
+      ## ADDED Requirements
+
+      ### Requirement: Guest checkout
+      As a guest, I want to pay without an account, so that I can buy quickly.
+      The system SHALL create the order without an account.
+
+      #### Scenario: guest pays by card
+      - **WHEN** a guest pays by card
+      - **THEN** the order is created without an account
+      ```
+      Rules:
+      - Body = one `As a <actor>, I want <feature>, so that <benefit>.` sentence
+        plus at least one SHALL/MUST line, under 500 characters, then at least
+        one `#### Scenario:` with WHEN and THEN steps.
+      - ADDED: a new story. Its name must not already exist in the living spec.
+      - MODIFIED: copy the WHOLE `### Story: <name>` block from
+        `docs/specs/<capability>.md`, change only the heading word `Story` to
+        `Requirement`, then edit. Keep the name exactly.
+      - REMOVED: `### Requirement: <name>` plus **Reason** and **Migration**.
+      - RENAMED: `- FROM: \`### Requirement: <old>\`` / `- TO: \`### Requirement: <new>\``.
+      - New capability only: start the file with `## Purpose` (one or two
+        sentences, 50+ characters).
+      - No file paths, class names or library choices; those go in design.md.
+
+      `openspec validate` reports MODIFIED/REMOVED targets as missing from
+      `openspec/specs/`. That is expected here (INFO only): the archive merge
+      checks them against `docs/specs/` instead.
+
+      After the last delta file is written, run:
+        npx openspec-matt base <change-name>
+      It records a fingerprint of every story you modify, remove or rename, so
+      archive can stop if someone edits those stories by hand in the meantime.
+      Re-run it whenever you change a delta.
+    requires:
+      - proposal
+
+  - id: design
+    generates: design.md
+    description: How to build it; decisions that are not ADRs
+    template: design.md
+    instruction: |
+      Write design.md: how to implement the change.
+      - **Context**, **Goals / Non-Goals**, **Risks / Trade-offs** as needed.
+      - **Implementation Decisions** and **Testing Decisions**: these feed the
+        living spec's sections of the same names at archive. No file paths or
+        code snippets.
+      - One place per decision: if grilling already wrote an ADR for a decision,
+        write only `- <decision in one line>. See ADR-NNNN` and do not restate
+        the reasoning.
+      Keep it short. Omit sections that would only restate the proposal.
+    requires:
+      - proposal
+
+  - id: tasks
+    generates: tasks.md
+    description: Links to the tracker tickets that implement the change
+    template: tasks.md
+    instruction: |
+      1. Draft the tasks as vertical slices (each one fits one context window and
+         ends in something testable), ordered so blockers come first.
+      2. STOP. Show the user the proposal, the deltas, the design and the draft
+         slices, and wait for an explicit "go". Do not create tickets before that.
+      3. After "go", invoke the `to-tickets` skill (mattpocock/skills) to publish
+         the slices to the project's issue tracker, as configured in
+         `docs/agents/issue-tracker.md`.
+      4. Rewrite tasks.md as one checkbox per ticket, in dependency order:
+         `- [ ] #<ticket> <ticket title>`
+         Nothing else goes in tasks.md: the tickets hold the detail.
+    requires:
+      - specs
+      - design
+
+apply:
+  requires: [tasks]
+  tracks: tasks.md
+  instruction: |
+    Work through tasks.md one ticket at a time, in order. For each ticket: read
+    it from the tracker, implement it test-first (the `tdd` skill), run the
+    `code-review` skill, then tick its box here. Clear context between tickets
+    when the session gets long. Pause on blockers or open questions.

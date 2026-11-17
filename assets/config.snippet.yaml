@@ -1,0 +1,43 @@
+schema: matt
+
+context: |
+  This project uses openspec-matt: OpenSpec's stock workflow, with Matt Pocock's skills doing the work.
+  Golden files (one copy each, read them before planning):
+  - docs/specs/<capability>.md: living specs, one per capability. openspec/specs/ stays empty.
+  - GLOSSARY.md: the domain language. Use its terms; avoid the words on its _Avoid_ lines.
+  - docs/adr/: architecture decisions.
+  - The issue tracker in docs/agents/issue-tracker.md: tickets and their history.
+  Everything in openspec/changes/ is disposable; archive turns it into golden files.
+
+operations:
+  archive:
+    # OpenSpec reads guidance as a list of strings; the stock archive skill treats it as advice
+    # it follows when compatible with its own steps. These steps are compatible with them.
+    guidance:
+      - >-
+        This project's living specs are docs/specs/<capability>.md and openspec/specs/ stays
+        empty, so MODIFIED deltas show as sync-blocked. That is expected: when asked about
+        syncing, choose "Archive without syncing" and let the change move to
+        openspec/changes/archive/ as usual. Then, in this same session, finish with the steps below.
+      - >-
+        Run `npx openspec-matt archive <change-name>`. It merges the story deltas into
+        docs/specs/<capability>.md deterministically. If it reports a conflict, nothing was
+        written: show the user the conflict, fold the hand edit into the delta in the archived
+        folder, re-run `npx openspec-matt base <change-name>`, and try again. Never edit around it.
+      - >-
+        Update the living specs' other sections (Problem Statement, Solution, Implementation
+        Decisions, Testing Decisions, Out of Scope, Further Notes) from proposal.md and design.md.
+        One place per decision: a decision with an ADR appears only as "<decision>. See ADR-NNNN".
+        Keep existing text where it is still true.
+      - >-
+        Re-check every ADR this branch added or changed: keep it only if it is hard to reverse,
+        surprising without context, and a real trade-off; otherwise fold it into the spec's
+        Implementation Decisions and delete it.
+      - >-
+        Run `npx openspec-matt lint`, show the user `git diff` of docs/specs, GLOSSARY.md and
+        docs/adr, and wait for approval.
+      - >-
+        Run `npx openspec-matt archive <change-name> --commit`. It commits the archived change with
+        the golden files, then deletes it (and anything under openspec/specs/) in a second commit.
+        CI lint fails while an archived change is left unconverted. Tell the user to use
+        proposal.md's Why as the squash commit message body, plus any No-Grill trailer printed.
