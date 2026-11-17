@@ -182,9 +182,29 @@ describe("archive", () => {
     expect(git("log", "-1", "--format=%s")).toBe("chore(openspec): remove archived change add-receipts");
   });
 
-  it("ignores dotfiles such as .DS_Store in openspec/changes/archive", () => {
+  it("refuses to merge into a living spec with duplicate story names", () => {
+    recordBase(root, "add-receipts");
+    const spec = read("docs/specs/checkout.md");
+    const story = spec.slice(spec.indexOf("### Story:"), spec.indexOf("## Implementation Decisions"));
+    write("docs/specs/checkout.md", spec.replace(story, story + story));
+    const outcome = mergeChange(root, "add-receipts");
+    expect(outcome.conflicts[0]!.problems.map((p) => p.code)).toEqual(["invalid-spec"]);
+    expect(outcome.conflicts[0]!.problems[0]!.message).toContain("duplicate-story");
+    expect(read("docs/specs/checkout.md")).toBe(spec.replace(story, story + story));
+  });
+
+  it("ignores dotfiles such as .DS_Store in openspec/changes/archive and openspec/specs", () => {
     write("openspec/changes/archive/.DS_Store", "");
+    write("openspec/specs/.DS_Store", "");
     expect(lintRepo(root)).toEqual([]);
+  });
+
+  it("changes nothing when the change folder is gitignored", () => {
+    write(".gitignore", "openspec/changes/\n");
+    recordBase(root, "add-receipts");
+    mergeChange(root, "add-receipts");
+    expect(() => commitChange(root, "add-receipts")).toThrow(/is gitignored/);
+    expect(existsSync(join(root, "openspec/changes/add-receipts/proposal.md"))).toBe(true);
   });
 
   it("refuses to commit before merging or with unrelated staged files", () => {

@@ -56,7 +56,8 @@ function main(argv: string[]): number {
       }
       const out = mergeChange(root, name);
       if (out.conflicts.length > 0) {
-        console.error("✗ nothing was written; resolve these, re-run 'openspec-matt base', then archive again:");
+        // Each message carries its own fix; only fingerprint conflicts call for re-running base.
+        console.error("✗ nothing was written; resolve these, then archive again:");
         for (const conflict of out.conflicts) for (const p of conflict.problems) console.error(`  ${conflict.capability}: ${p.message}`);
         return 1;
       }

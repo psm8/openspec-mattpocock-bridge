@@ -39,7 +39,7 @@ export function mergeChange(root: string, name: string): MergeOutcome {
       const current = readLivingSpec(root, capability);
       // A malformed spec (duplicate story names, a stray '### Notes' inside User Stories) would be
       // merged wrongly, so it must be fixed first.
-      if (current !== undefined) assertLintClean(capability, current, file, "fix the living spec first");
+      if (current !== undefined) assertLintClean(capability, current, file, "fix the living spec first (do not re-run base for this; it would accept hand edits made since propose)");
       const result = mergeDelta(current, capability, delta, meta.base(capability));
       assertLintClean(capability, result.text, file, "the delta would produce an invalid spec; fix the delta");
       outcome.applied[capability] = result.applied;
@@ -98,6 +98,11 @@ export function commitChange(root: string, name: string): CommitOutcome {
     throw new UsageError(`unstage these first, archive commits only the change and golden files:\n  ${foreign.join("\n  ")}`);
   }
 
+  // The folder is deleted after it is committed, so it must be committable: never delete what git won't record.
+  if (isIgnored(root, change.relDir)) {
+    throw new UsageError(`${change.relDir} is gitignored, so it can't be committed; nothing was changed`);
+  }
+
   const noGrill = noGrillReason(change);
   const trailer = noGrill ? `\n\nNo-Grill: ${noGrill}` : "";
   const openTasks = countOpenTasks(change);
@@ -115,10 +120,19 @@ export function commitChange(root: string, name: string): CommitOutcome {
     }
   }
   stage(root, [change.relDir, "openspec/specs"]);
-  const removal = commitStaged(root, `chore(openspec): remove archived change ${name}`);
-  if (removal === undefined) throw new UsageError(`nothing to remove for '${name}'; was it committed already?`);
+  // The folder was committed above (it is not ignored), so its deletion is always staged.
+  const removal = commitStaged(root, `chore(openspec): remove archived change ${name}`)!;
 
   return { snapshot, removal, noGrill, openTasks };
+}
+
+function isIgnored(root: string, path: string): boolean {
+  try {
+    git(root, "check-ignore", "-q", "--", path);
+    return true;
+  } catch {
+    return false; // exit status 1: not ignored
+  }
 }
 
 /** Commits what is staged and returns the short sha, or undefined when nothing is staged. */
