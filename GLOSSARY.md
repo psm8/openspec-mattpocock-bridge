@@ -45,5 +45,5 @@ The fingerprint of a story taken at propose, used at archive to detect a hand ed
 _Avoid_: checksum, version
 
 **Archive**:
-The step that moves a finished change aside (OpenSpec's own archive), merges its deltas into living specs, commits the middle once, then deletes it.
+The step that moves a finished change aside (OpenSpec's own archive), merges its deltas into living specs, records the middle in one commit, then deletes it in a second.
 _Avoid_: close, finish, sync (OpenSpec's sync writes `openspec/specs/`, which this workflow leaves empty)

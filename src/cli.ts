@@ -47,7 +47,8 @@ function main(argv: string[]): number {
       const name = required(args[0], "change");
       if (flags.has("--commit")) {
         const out = commitChange(root, name);
-        console.log(`✓ ${out.snapshot} archived change ${name} with the golden files`);
+        if (out.snapshot) console.log(`✓ ${out.snapshot} archived change ${name} with the golden files`);
+        else console.log(`✓ change ${name} and the golden files were already committed`);
         console.log(`✓ ${out.removal} removed openspec/changes/${name}`);
         if (out.openTasks > 0) console.log(`! ${out.openTasks} task(s) in tasks.md were still open`);
         console.log("\nSquash-merge with proposal.md's Why as the commit body" + (out.noGrill ? ` and the trailer:\n  No-Grill: ${out.noGrill}` : "."));
@@ -63,7 +64,6 @@ function main(argv: string[]): number {
         const created = out.created.includes(capability) ? " (new)" : "";
         console.log(`✓ docs/specs/${capability}.md${created}: ${applied.join(", ")}`);
       }
-      out.findings.forEach((f) => console.log(formatFinding(f)));
       console.log(`\nNext: update the other spec sections, re-check this branch's ADRs, review 'git diff', then:\n  openspec-matt archive ${name} --commit`);
       return 0;
     }

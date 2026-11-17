@@ -4,7 +4,14 @@ import { parseLivingSpec, renderLivingSpec, type LivingSpec, type Story } from "
 import { emptyLivingSpec } from "../spec/template.js";
 import { hashStory } from "./hash.js";
 
-export type ConflictCode = "base-mismatch" | "no-base" | "unknown-target" | "duplicate-added" | "no-user-stories";
+export type ConflictCode =
+  | "invalid-spec"
+  | "base-mismatch"
+  | "no-base"
+  | "unknown-target"
+  | "duplicate-added"
+  | "rename-collision"
+  | "no-user-stories";
 
 export interface Problem {
   code: ConflictCode;
@@ -90,7 +97,7 @@ export function mergeDelta(specText: string | undefined, capability: string, del
     const index = verify(from, "RENAMED");
     if (index < 0) continue;
     if (find(to) >= 0) {
-      problems.push({ code: "duplicate-added", story: to, message: `RENAMED to '${to}': a story with that name already exists` });
+      problems.push({ code: "rename-collision", story: to, message: `RENAMED to '${to}': a story with that name already exists` });
       continue;
     }
     spec.stories[index] = { ...spec.stories[index]!, name: to, raw: undefined };
@@ -131,7 +138,7 @@ export function mergeDelta(specText: string | undefined, capability: string, del
   return { text: renderLivingSpec(spec), applied, created };
 }
 
-const ORDER: ConflictCode[] = ["no-user-stories", "unknown-target", "no-base", "base-mismatch", "duplicate-added"];
+const ORDER: ConflictCode[] = ["invalid-spec", "no-user-stories", "unknown-target", "no-base", "base-mismatch", "duplicate-added", "rename-collision"];
 function sortProblems(problems: Problem[]): Problem[] {
   return [...problems].sort((a, b) => ORDER.indexOf(a.code) - ORDER.indexOf(b.code));
 }

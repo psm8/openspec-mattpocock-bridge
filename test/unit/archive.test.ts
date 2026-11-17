@@ -95,7 +95,7 @@ describe("archive", () => {
     const outcome = commitChange(root, "add-receipts");
 
     expect(existsSync(join(root, "openspec/changes/add-receipts"))).toBe(false);
-    const snapshotFiles = git("show", "--name-only", "--format=", outcome.snapshot).split("\n").sort();
+    const snapshotFiles = git("show", "--name-only", "--format=", outcome.snapshot!).split("\n").sort();
     expect(snapshotFiles).toEqual([
       "GLOSSARY.md",
       "docs/specs/checkout.md",
@@ -120,7 +120,7 @@ describe("archive", () => {
     const outcome = commitChange(root, "add-receipts");
     expect(outcome.noGrill).toBe("CI hotfix run");
     expect(outcome.openTasks).toBe(1);
-    expect(git("log", "-1", "--format=%B", outcome.snapshot)).toContain("No-Grill: CI hotfix run");
+    expect(git("log", "-1", "--format=%B", outcome.snapshot!)).toContain("No-Grill: CI hotfix run");
   });
 
   it("finishes a change the stock archive skill already moved (and synced)", () => {
@@ -146,6 +146,45 @@ describe("archive", () => {
     expect(existsSync(join(root, "openspec/specs/.gitkeep"))).toBe(true);
     expect(lintRepo(root)).toEqual([]);
     expect(read("docs/specs/receipts.md")).toContain("### Story: receipt pdf");
+  });
+
+  it("refuses to merge into a living spec that fails lint, writing nothing", () => {
+    recordBase(root, "add-receipts");
+    const before = read("docs/specs/checkout.md");
+    write("docs/specs/checkout.md", before.replace("#### Scenario: works", "### Notes\nhand-written\n\n#### Scenario: works"));
+    const outcome = mergeChange(root, "add-receipts");
+    expect(outcome.conflicts.map((c) => c.capability)).toEqual(["checkout"]);
+    expect(new Set(outcome.conflicts[0]!.problems.map((p) => p.code))).toEqual(new Set(["invalid-spec"]));
+    expect(outcome.conflicts[0]!.problems[0]!.message).toContain("fix the living spec first");
+    expect(existsSync(join(root, "docs/specs/receipts.md"))).toBe(false);
+  });
+
+  it("refuses a delta that would produce an invalid spec", () => {
+    write(
+      "openspec/changes/add-receipts/specs/receipts/spec.md",
+      "## ADDED Requirements\n### Requirement: receipt pdf\nA PDF.\n\n#### Scenario: works\n- WHEN used THEN it works\n",
+    );
+    recordBase(root, "add-receipts");
+    const outcome = mergeChange(root, "add-receipts");
+    expect(outcome.conflicts.map((c) => [c.capability, c.problems[0]!.code])).toEqual([["receipts", "invalid-spec"]]);
+    expect(read("docs/specs/checkout.md")).not.toContain("email a receipt");
+  });
+
+  it("skips the archive commit when the change and golden files are already committed", () => {
+    write("openspec/changes/add-receipts/specs/checkout/spec.md", "");
+    write("openspec/changes/add-receipts/specs/receipts/spec.md", "");
+    recordBase(root, "add-receipts");
+    mergeChange(root, "add-receipts");
+    git("add", ".");
+    git("commit", "-qm", "everything already committed");
+    const outcome = commitChange(root, "add-receipts");
+    expect(outcome.snapshot).toBeUndefined();
+    expect(git("log", "-1", "--format=%s")).toBe("chore(openspec): remove archived change add-receipts");
+  });
+
+  it("ignores dotfiles such as .DS_Store in openspec/changes/archive", () => {
+    write("openspec/changes/archive/.DS_Store", "");
+    expect(lintRepo(root)).toEqual([]);
   });
 
   it("refuses to commit before merging or with unrelated staged files", () => {

@@ -42,7 +42,7 @@ Have an existing codebase with no specs? Ask your agent to run the `matt-bootstr
 3. **`/openspec-archive-change`.** It runs as usual. You choose *Archive without syncing*, because `openspec/specs/` stays empty, and the change moves to `openspec/changes/archive/`. The archive guidance in `config.yaml` then has the agent run `openspec-matt archive`, which:
    - merges the story deltas into `docs/specs/`;
    - has the agent update the spec's prose sections and re-check new ADRs;
-   - commits the archived change once, then deletes it.
+   - records the archived change and the golden files in one commit, then deletes the change in a second commit.
 
    CI lint fails while an archived change is left unconverted.
 4. **Squash-merge**, with the proposal's *Why* as the commit body. History is `git log docs/specs GLOSSARY.md docs/adr`.
@@ -59,7 +59,7 @@ You can also edit `docs/specs/` by hand when you skip OpenSpec. CI lint keeps th
 | `openspec-matt base <change>` | Fingerprint the stories a change's deltas touch |
 | `openspec-matt archive <change>` | Merge the change's story deltas into `docs/specs/` (all or nothing) |
 | `openspec-matt archive <change> --commit` | Commit the change with the golden files, then delete it |
-| `openspec-matt lint` | Fail on spec format, duplicate ADR numbers or duplicate story names; warn on long ADRs and glossary entries |
+| `openspec-matt lint` | Fail on spec format, duplicate story names, ADR file names or numbers, and changes left in `openspec/changes/archive/` or `openspec/specs/`; warn on long ADRs and glossary entries |
 | `openspec-matt bootstrap <capability...>` | Create empty living specs for `matt-bootstrap` to fill |
 
 ## Living spec format

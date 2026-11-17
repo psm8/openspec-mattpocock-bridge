@@ -42,7 +42,7 @@ export function lintRepo(root: string): Finding[] {
 function lintLeftovers(root: string): Finding[] {
   const findings: Finding[] = [];
   const entries = (rel: string) =>
-    existsSync(join(root, rel)) ? readdirSync(join(root, rel)).filter((e) => e !== ".gitkeep").sort() : [];
+    existsSync(join(root, rel)) ? readdirSync(join(root, rel)).filter((e) => !e.startsWith(".")).sort() : []; // skips .gitkeep, .DS_Store
 
   for (const entry of entries("openspec/changes/archive")) {
     const name = entry.replace(/^\d{4}-\d{2}-\d{2}-/, "");

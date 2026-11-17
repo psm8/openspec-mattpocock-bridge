@@ -13,34 +13,37 @@ import {
 import { git, stagedFiles } from "../git.js";
 import { MergeConflict, mergeDelta } from "../merge/merge.js";
 import { lintLivingSpec } from "../spec/lint.js";
-import type { Finding } from "../lint/finding.js";
 
 export interface MergeOutcome {
   /** Capability -> applied operations. */
   applied: Record<string, string[]>;
   created: string[];
-  findings: Finding[];
   conflicts: MergeConflict[];
 }
 
 /**
  * Step 1 of archive: merge every delta into docs/specs. All-or-nothing: if any capability
- * conflicts, no file is written.
+ * conflicts, or a spec fails lint before or after the merge, no file is written.
  */
 export function mergeChange(root: string, name: string): MergeOutcome {
   const change = openChange(root, name);
   const meta = new ChangeMeta(change);
   if (meta.merged) throw new UsageError(`'${name}' is already merged into ${SPECS_DIR}; run 'openspec-matt archive ${name} --commit'`);
 
-  const outcome: MergeOutcome = { applied: {}, created: [], findings: [], conflicts: [] };
+  const outcome: MergeOutcome = { applied: {}, created: [], conflicts: [] };
   const writes: { path: string; text: string }[] = [];
 
   for (const { capability, delta } of readDeltas(change)) {
+    const file = `${SPECS_DIR}/${capability}.md`;
     try {
-      const result = mergeDelta(readLivingSpec(root, capability), capability, delta, meta.base(capability));
+      const current = readLivingSpec(root, capability);
+      // A malformed spec (duplicate story names, a stray '### Notes' inside User Stories) would be
+      // merged wrongly, so it must be fixed first.
+      if (current !== undefined) assertLintClean(capability, current, file, "fix the living spec first");
+      const result = mergeDelta(current, capability, delta, meta.base(capability));
+      assertLintClean(capability, result.text, file, "the delta would produce an invalid spec; fix the delta");
       outcome.applied[capability] = result.applied;
       if (result.created) outcome.created.push(capability);
-      outcome.findings.push(...lintLivingSpec(result.text, `${SPECS_DIR}/${capability}.md`));
       writes.push({ path: livingSpecPath(root, capability), text: result.text });
     } catch (error) {
       if (!(error instanceof MergeConflict)) throw error;
@@ -59,8 +62,18 @@ export function mergeChange(root: string, name: string): MergeOutcome {
   return outcome;
 }
 
+function assertLintClean(capability: string, text: string, file: string, hint: string): void {
+  const errors = lintLivingSpec(text, file).filter((f) => f.severity === "error");
+  if (errors.length === 0) return;
+  throw new MergeConflict(
+    capability,
+    errors.map((f) => ({ code: "invalid-spec", story: "", message: `${hint}: ${f.file}:${f.line} [${f.code}] ${f.message}` })),
+  );
+}
+
 export interface CommitOutcome {
-  snapshot: string;
+  /** Undefined when there was nothing new to record (the change was already committed as is). */
+  snapshot?: string;
   removal: string;
   noGrill?: string;
   openTasks: number;
@@ -91,8 +104,7 @@ export function commitChange(root: string, name: string): CommitOutcome {
 
   git(root, "reset", "-q", "--", "openspec/specs");
   stage(root, [change.relDir, activeDir, ...GOLDEN_PATHS]);
-  git(root, "commit", "-m", `docs(spec): archive change ${name}${trailer}`);
-  const snapshot = git(root, "rev-parse", "--short", "HEAD");
+  const snapshot = commitStaged(root, `docs(spec): archive change ${name}${trailer}`);
 
   rmSync(change.dir, { recursive: true, force: true });
   // openspec/specs stays empty in this workflow; drop anything a stock "Sync now" wrote there.
@@ -103,10 +115,17 @@ export function commitChange(root: string, name: string): CommitOutcome {
     }
   }
   stage(root, [change.relDir, "openspec/specs"]);
-  git(root, "commit", "-m", `chore(openspec): remove archived change ${name}`);
-  const removal = git(root, "rev-parse", "--short", "HEAD");
+  const removal = commitStaged(root, `chore(openspec): remove archived change ${name}`);
+  if (removal === undefined) throw new UsageError(`nothing to remove for '${name}'; was it committed already?`);
 
   return { snapshot, removal, noGrill, openTasks };
+}
+
+/** Commits what is staged and returns the short sha, or undefined when nothing is staged. */
+function commitStaged(root: string, message: string): string | undefined {
+  if (stagedFiles(root).length === 0) return undefined;
+  git(root, "commit", "-m", message);
+  return git(root, "rev-parse", "--short", "HEAD");
 }
 
 /** `git add --all` for the paths that exist or are tracked (git rejects a pathspec matching neither). */

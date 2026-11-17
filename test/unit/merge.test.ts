@@ -176,6 +176,13 @@ ${story("Ghost")}
       ]);
     });
 
+    it("stops when a rename targets an existing story name", () => {
+      const delta = parseDelta(
+        "## RENAMED Requirements\n- FROM: `### Requirement: Guest checkout`\n- TO: `### Requirement: Saved cards`\n",
+      );
+      expect(conflicts(() => mergeDelta(spec, "checkout", delta, baseFor("Guest checkout")))).toEqual(["rename-collision"]);
+    });
+
     it("stops on MODIFIED for a capability with no spec", () => {
       const delta = parseDelta(`## MODIFIED Requirements\n${story("Ghost")}`);
       expect(conflicts(() => mergeDelta(undefined, "nope", delta, {}))).toEqual(["unknown-target"]);
